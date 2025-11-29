@@ -155,6 +155,7 @@ const EditChannelModal = (props) => {
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
+    vertex_project_id: '',
     // 仅 AWS: 密钥格式和区域（存入 settings.aws_key_type 和 settings.aws_region）
     aws_key_type: 'ak_sk',
     // 企业账户设置
@@ -559,8 +560,9 @@ const EditChannelModal = (props) => {
           const parsedSettings = JSON.parse(data.settings);
           data.azure_responses_version =
             parsedSettings.azure_responses_version || '';
-          // 读取 Vertex 密钥格式
+          // 读取 Vertex 密钥格式和 Project ID
           data.vertex_key_type = parsedSettings.vertex_key_type || 'json';
+          data.vertex_project_id = parsedSettings.vertex_project_id || '';
           // 读取 AWS 密钥格式和区域
           data.aws_key_type = parsedSettings.aws_key_type || 'ak_sk';
           // 读取企业账户设置
@@ -576,6 +578,7 @@ const EditChannelModal = (props) => {
           data.azure_responses_version = '';
           data.region = '';
           data.vertex_key_type = 'json';
+          data.vertex_project_id = '';
           data.aws_key_type = 'ak_sk';
           data.is_enterprise_account = false;
           data.allow_service_tier = false;
@@ -585,6 +588,7 @@ const EditChannelModal = (props) => {
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
         data.vertex_key_type = 'json';
+        data.vertex_project_id = '';
         data.aws_key_type = 'ak_sk';
         data.is_enterprise_account = false;
         data.allow_service_tier = false;
@@ -1694,6 +1698,7 @@ const EditChannelModal = (props) => {
                         optionList={[
                           { label: 'JSON', value: 'json' },
                           { label: 'API Key', value: 'api_key' },
+                          { label: 'API Key (with Project)', value: 'api_key_with_project' },
                         ]}
                         style={{ width: '100%' }}
                         value={inputs.vertex_key_type || 'json'}
@@ -1703,8 +1708,8 @@ const EditChannelModal = (props) => {
                             'vertex_key_type',
                             value,
                           );
-                          // 切换为 api_key 时，关闭批量与手动/文件切换，并清理已选文件
-                          if (value === 'api_key') {
+                          // 切换为 api_key 或 api_key_with_project 时，关闭批量与手动/文件切换，并清理已选文件
+                          if (value === 'api_key' || value === 'api_key_with_project') {
                             setBatch(false);
                             setUseManualInput(false);
                             setVertexKeys([]);
@@ -1717,8 +1722,25 @@ const EditChannelModal = (props) => {
                         extraText={
                           inputs.vertex_key_type === 'api_key'
                             ? t('API Key 模式下不支持批量创建')
+                            : inputs.vertex_key_type === 'api_key_with_project'
+                            ? t('API Key (with Project) 模式需要填写 Project ID，不支持批量创建')
                             : t('JSON 模式支持手动输入或上传服务账号 JSON')
                         }
+                      />
+                    )}
+                    {inputs.type === 41 && inputs.vertex_key_type === 'api_key_with_project' && (
+                      <Form.Input
+                        field='vertex_project_id'
+                        label={t('Project ID')}
+                        placeholder={t('请输入 GCP Project ID')}
+                        value={inputs.vertex_project_id || ''}
+                        onChange={(value) => {
+                          handleChannelOtherSettingsChange('vertex_project_id', value);
+                        }}
+                        rules={[
+                          { required: true, message: t('Project ID 是必填项') },
+                        ]}
+                        extraText={t('格式如：my-project-123456')}
                       />
                     )}
                     {batch ? (

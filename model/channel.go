@@ -200,6 +200,44 @@ func (channel *Channel) GetModels() []string {
 	return strings.Split(strings.Trim(channel.Models, ","), ",")
 }
 
+// getModelsWithMappingTargets 获取模型列表，包括模型重定向的目标模型
+// 这样在生成 abilities 时，重定向的目标模型也会被添加到 abilities 表中
+// 从而支持在渠道选择时能够匹配到重定向前的模型名
+func (channel *Channel) getModelsWithMappingTargets(models []string) []string {
+	modelSet := make(map[string]struct{})
+	
+	// 添加原始模型列表
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model != "" {
+			modelSet[model] = struct{}{}
+		}
+	}
+	
+	// 解析模型重定向配置，添加目标模型
+	if channel.ModelMapping != nil && *channel.ModelMapping != "" && *channel.ModelMapping != "{}" {
+		var modelMapping map[string]string
+		err := json.Unmarshal([]byte(*channel.ModelMapping), &modelMapping)
+		if err == nil {
+			// 将所有重定向的目标模型也添加到集合中
+			for _, targetModel := range modelMapping {
+				targetModel = strings.TrimSpace(targetModel)
+				if targetModel != "" {
+					modelSet[targetModel] = struct{}{}
+				}
+			}
+		}
+	}
+	
+	// 转换为列表
+	result := make([]string, 0, len(modelSet))
+	for model := range modelSet {
+		result = append(result, model)
+	}
+	
+	return result
+}
+
 func (channel *Channel) GetGroups() []string {
 	if channel.Group == "" {
 		return []string{}

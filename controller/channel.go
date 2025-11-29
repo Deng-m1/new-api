@@ -490,6 +490,14 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 		if regionMap["default"] == nil {
 			return fmt.Errorf("部署地区必须包含default字段")
 		}
+
+		// 混合模式 Project ID 验证
+		settings := channel.GetOtherSettings()
+		if settings.VertexKeyType == dto.VertexKeyTypeAPIKeyWithProject {
+			if settings.VertexProjectID == "" {
+				return fmt.Errorf("API Key (with Project) 模式下必须填写 Project ID")
+			}
+		}
 	}
 
 	return nil
@@ -557,7 +565,7 @@ func AddChannel(c *gin.Context) {
 	case "multi_to_single":
 		addChannelRequest.Channel.ChannelInfo.IsMultiKey = true
 		addChannelRequest.Channel.ChannelInfo.MultiKeyMode = addChannelRequest.MultiKeyMode
-		if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
+		if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType == dto.VertexKeyTypeJSON {
 			array, err := getVertexArrayKeys(addChannelRequest.Channel.Key)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
@@ -582,7 +590,7 @@ func AddChannel(c *gin.Context) {
 		}
 		keys = []string{addChannelRequest.Channel.Key}
 	case "batch":
-		if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
+		if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi && addChannelRequest.Channel.GetOtherSettings().VertexKeyType == dto.VertexKeyTypeJSON {
 			// multi json
 			keys, err = getVertexArrayKeys(addChannelRequest.Channel.Key)
 			if err != nil {
@@ -603,6 +611,20 @@ func AddChannel(c *gin.Context) {
 			"message": "不支持的添加模式",
 		})
 		return
+	}
+
+	// Vertex AI 混合模式验证
+	if addChannelRequest.Channel.Type == constant.ChannelTypeVertexAi {
+		settings := addChannelRequest.Channel.GetOtherSettings()
+		if settings.VertexKeyType == dto.VertexKeyTypeAPIKeyWithProject {
+			if settings.VertexProjectID == "" {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "API Key (with Project) 模式下必须填写 Project ID",
+				})
+				return
+			}
+		}
 	}
 
 	channels := make([]model.Channel, 0, len(keys))
@@ -868,18 +890,18 @@ func UpdateChannel(c *gin.Context) {
 					existingKeys = strings.Split(strings.Trim(originChannel.Key, "\n"), "\n")
 				}
 
-				// 处理 Vertex AI 的特殊情况
-				if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
-					// 尝试解析新密钥为JSON数组
-					if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
-						array, err := getVertexArrayKeys(channel.Key)
-						if err != nil {
-							c.JSON(http.StatusOK, gin.H{
-								"success": false,
-								"message": "追加密钥解析失败: " + err.Error(),
-							})
-							return
-						}
+			// 处理 Vertex AI 的特殊情况
+			if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType == dto.VertexKeyTypeJSON {
+				// 尝试解析新密钥为JSON数组
+				if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
+					array, err := getVertexArrayKeys(channel.Key)
+					if err != nil {
+						c.JSON(http.StatusOK, gin.H{
+							"success": false,
+							"message": "追加密钥解析失败: " + err.Error(),
+						})
+						return
+					}
 						newKeys = array
 					} else {
 						// 单个JSON密钥

@@ -12,8 +12,9 @@ type ChannelSettings struct {
 type VertexKeyType string
 
 const (
-	VertexKeyTypeJSON   VertexKeyType = "json"
-	VertexKeyTypeAPIKey VertexKeyType = "api_key"
+	VertexKeyTypeJSON             VertexKeyType = "json"
+	VertexKeyTypeAPIKey           VertexKeyType = "api_key"
+	VertexKeyTypeAPIKeyWithProject VertexKeyType = "api_key_with_project"
 )
 
 type AwsKeyType string
@@ -25,7 +26,8 @@ const (
 
 type ChannelOtherSettings struct {
 	AzureResponsesVersion string        `json:"azure_responses_version,omitempty"`
-	VertexKeyType         VertexKeyType `json:"vertex_key_type,omitempty"` // "json" or "api_key"
+	VertexKeyType         VertexKeyType `json:"vertex_key_type,omitempty"`         // "json", "api_key", or "api_key_with_project"
+	VertexProjectID       string        `json:"vertex_project_id,omitempty"`       // Project ID for api_key_with_project mode
 	OpenRouterEnterprise  *bool         `json:"openrouter_enterprise,omitempty"`
 	AllowServiceTier      bool          `json:"allow_service_tier,omitempty"`      // 是否允许 service_tier 透传（默认过滤以避免额外计费）
 	DisableStore          bool          `json:"disable_store,omitempty"`           // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）

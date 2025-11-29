@@ -146,9 +146,13 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {
 	models_ := strings.Split(channel.Models, ",")
 	groups_ := strings.Split(channel.Group, ",")
+	
+	// 获取所有需要添加到 abilities 的模型（包括重定向目标模型）
+	allModels := channel.getModelsWithMappingTargets(models_)
+	
 	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
+	abilities := make([]Ability, 0, len(allModels)*len(groups_))
+	for _, model := range allModels {
 		for _, group := range groups_ {
 			key := group + "|" + model
 			if _, exists := abilitySet[key]; exists {
@@ -218,9 +222,13 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 	// Then add new abilities
 	models_ := strings.Split(channel.Models, ",")
 	groups_ := strings.Split(channel.Group, ",")
+	
+	// 获取所有需要添加到 abilities 的模型（包括重定向目标模型）
+	allModels := channel.getModelsWithMappingTargets(models_)
+	
 	abilitySet := make(map[string]struct{})
-	abilities := make([]Ability, 0, len(models_))
-	for _, model := range models_ {
+	abilities := make([]Ability, 0, len(allModels)*len(groups_))
+	for _, model := range allModels {
 		for _, group := range groups_ {
 			key := group + "|" + model
 			if _, exists := abilitySet[key]; exists {

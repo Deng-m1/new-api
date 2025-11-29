@@ -88,7 +88,10 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 
 func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix string) (string, error) {
 	region := GetModelRegion(info.ApiVersion, info.OriginModelName)
-	if info.ChannelOtherSettings.VertexKeyType != dto.VertexKeyTypeAPIKey {
+	
+	switch info.ChannelOtherSettings.VertexKeyType {
+	case dto.VertexKeyTypeJSON:
+		// JSON 模式：使用服务账号 JSON 和 Bearer Token
 		adc := &Credentials{}
 		if err := common.Unmarshal([]byte(info.ApiKey), adc); err != nil {
 			return "", fmt.Errorf("failed to decode credentials file: %w", err)
@@ -139,7 +142,77 @@ func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix s
 				region,
 			), nil
 		}
-	} else {
+		
+	case dto.VertexKeyTypeAPIKeyWithProject:
+		// 混合模式：API Key + Project/Location 路径
+		projectID := info.ChannelOtherSettings.VertexProjectID
+		if projectID == "" {
+			return "", errors.New("vertex_project_id is required for api_key_with_project mode")
+		}
+		
+		var keyPrefix string
+		if strings.HasSuffix(suffix, "?alt=sse") {
+			keyPrefix = "&"
+		} else {
+			keyPrefix = "?"
+		}
+		
+		if a.RequestMode == RequestModeGemini {
+			if region == "global" {
+				return fmt.Sprintf(
+					"https://aiplatform.googleapis.com/v1/projects/%s/locations/global/publishers/google/models/%s:%s%skey=%s",
+					projectID,
+					modelName,
+					suffix,
+					keyPrefix,
+					info.ApiKey,
+				), nil
+			} else {
+				return fmt.Sprintf(
+					"https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/google/models/%s:%s%skey=%s",
+					region,
+					projectID,
+					region,
+					modelName,
+					suffix,
+					keyPrefix,
+					info.ApiKey,
+				), nil
+			}
+		} else if a.RequestMode == RequestModeClaude {
+			if region == "global" {
+				return fmt.Sprintf(
+					"https://aiplatform.googleapis.com/v1/projects/%s/locations/global/publishers/anthropic/models/%s:%s%skey=%s",
+					projectID,
+					modelName,
+					suffix,
+					keyPrefix,
+					info.ApiKey,
+				), nil
+			} else {
+				return fmt.Sprintf(
+					"https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:%s%skey=%s",
+					region,
+					projectID,
+					region,
+					modelName,
+					suffix,
+					keyPrefix,
+					info.ApiKey,
+				), nil
+			}
+		} else if a.RequestMode == RequestModeLlama {
+			return fmt.Sprintf(
+				"https://%s-aiplatform.googleapis.com/v1beta1/projects/%s/locations/%s/endpoints/openapi/chat/completions?key=%s",
+				region,
+				projectID,
+				region,
+				info.ApiKey,
+			), nil
+		}
+		
+	case dto.VertexKeyTypeAPIKey, "":
+		// 纯 API Key 模式：不包含 project/location 路径
 		var keyPrefix string
 		if strings.HasSuffix(suffix, "?alt=sse") {
 			keyPrefix = "&"
@@ -164,7 +237,11 @@ func (a *Adaptor) getRequestUrl(info *relaycommon.RelayInfo, modelName, suffix s
 				info.ApiKey,
 			), nil
 		}
+		
+	default:
+		return "", fmt.Errorf("unsupported vertex_key_type: %s", info.ChannelOtherSettings.VertexKeyType)
 	}
+	
 	return "", errors.New("unsupported request mode")
 }
 
@@ -213,7 +290,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
-	if info.ChannelOtherSettings.VertexKeyType != dto.VertexKeyTypeAPIKey {
+	// 只有 JSON 模式才使用 Bearer Token
+	if info.ChannelOtherSettings.VertexKeyType == dto.VertexKeyTypeJSON {
 		accessToken, err := getAccessToken(a, info)
 		if err != nil {
 			return err
