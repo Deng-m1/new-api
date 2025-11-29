@@ -19,7 +19,7 @@ type PasskeySettings struct {
 }
 
 var defaultPasskeySettings = PasskeySettings{
-	Enabled:              false,
+	Enabled              false,
 	RPDisplayName:        common.SystemName,
 	RPID:                 "",
 	Origins:              "",
@@ -33,13 +33,15 @@ func init() {
 }
 
 func GetPasskeySettings() *PasskeySettings {
-	if defaultPasskeySettings.RPID == "" && ServerAddress != "" {
+	// 每次都从ServerAddress重新计算RPID，修复缓存问题
+	if ServerAddress != "" {
 		// 从ServerAddress提取域名作为RPID
 		// ServerAddress可能是 "https://newapi.pro" 这种格式
 		serverAddr := strings.TrimSpace(ServerAddress)
 		if parsed, err := url.Parse(serverAddr); err == nil && parsed.Host != "" {
 			defaultPasskeySettings.RPID = parsed.Host
 		} else {
+			// 如果解析失败或没有Host（比如只有域名没有协议），直接使用
 			defaultPasskeySettings.RPID = serverAddr
 		}
 	}
