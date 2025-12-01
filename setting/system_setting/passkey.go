@@ -19,7 +19,7 @@ type PasskeySettings struct {
 }
 
 var defaultPasskeySettings = PasskeySettings{
-	Enabled              false,
+	Enabled:              false,
 	RPDisplayName:        common.SystemName,
 	RPID:                 "",
 	Origins:              "",

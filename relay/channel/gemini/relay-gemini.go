@@ -46,6 +46,19 @@ var geminiSupportedMimeTypes = map[string]bool{
 
 const thoughtSignatureBypassValue = "context_engineering_is_the_way_to_go"
 
+// DUMMY_THOUGHT_SIGNATURE_BASE64 是用于 Gemini 3+ 模型的虚拟 thought signature（Base64 编码）
+// Gemini 3+ 模型在 function call 中要求必须有 thought_signature 字段（TYPE_BYTES）
+// API 期望接收 Base64 编码的字符串，然后解码为二进制数据
+// 这个值来自 LangChain 的实现：
+// https://github.com/langchain-ai/langchain-google/blob/main/libs/genai/langchain_google_genai/chat_models.py
+const DUMMY_THOUGHT_SIGNATURE_BASE64 = "ErQCCrECAdHtim8MtxgeMCRCiNiyoyImxtYAEDzz4NXOr/HSL3rA7rPPvHWZCm+T9VSDYh/mt9lESoH4wQh/ca1zDtWTN6XOL1+S3krYLQeqp47RV/b1eSq5jdZF28S4Lb7w4A3/EFdybc4SFb2/YhMm+CulYLmLA4Tr4VSu0eMWgxM3HVt6u0jECf5BbXzj0qjJ32tEQYJvKvV8H1tCHvB6J+RZhsDr+TcyOCaqxDoR4WKxXYxNRZb3hYTuCnBEDPhn1lROumVaghi9nEIgc17z002zLoyqIptlLfIVw70FXkCLsPUSL1SjPQYtGL8PVncVajeqGogRD/eZSVZ1Zr5tshxh3DQ+JAYNcrHaRHWC4Hg0H6oftYx+JdJD9B/81NYV9jyGxP7zHKFHOELl0IUP5GEXP9I="
+
+// getDummyThoughtSignature 返回 Base64 编码的 thought signature
+func getDummyThoughtSignature() json.RawMessage {
+	// 返回 Base64 编码的字符串，用引号包裹作为 JSON 字符串
+	return json.RawMessage(strconv.Quote(DUMMY_THOUGHT_SIGNATURE_BASE64))
+}
+
 // Gemini 允许的思考预算范围
 const (
 	pro25MinBudget       = 128
@@ -63,6 +76,40 @@ func isNew25ProModel(modelName string) bool {
 
 func is25FlashLiteModel(modelName string) bool {
 	return strings.HasPrefix(modelName, "gemini-2.5-flash-lite")
+}
+
+// isGemini3OrLater 检测是否是 Gemini 3.0 或更高版本的模型
+// Gemini 3+ 模型在 function call 中要求必须有 thought_signature 字段
+func isGemini3OrLater(modelName string) bool {
+	if modelName == "" {
+		return false
+	}
+	modelName = strings.ToLower(modelName)
+	// 移除 "models/" 前缀
+	modelName = strings.TrimPrefix(modelName, "models/")
+	
+	// 检查是否包含 gemini-3
+	if strings.Contains(modelName, "gemini-3") {
+		return true
+	}
+	
+	// 检查更高版本（gemini-4, gemini-5 等）
+	if strings.HasPrefix(modelName, "gemini-") {
+		parts := strings.Split(modelName, "-")
+		if len(parts) >= 2 {
+			// 提取版本号（第二部分）
+			versionStr := parts[1]
+			// 尝试解析为数字
+			if len(versionStr) > 0 && versionStr[0] >= '0' && versionStr[0] <= '9' {
+				version := int(versionStr[0] - '0')
+				if version >= 3 {
+					return true
+				}
+			}
+		}
+	}
+	
+	return false
 }
 
 // clampThinkingBudget 根据模型名称将预算限制在允许的范围内
@@ -389,11 +436,14 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 		}
 		shouldAttachThoughtSignature := attachThoughtSignature && (message.Role == "assistant" || message.Role == "model")
 		signatureAttached := false
+		// Gemini 3+ 模型需要在所有 function_call 中添加 thought_signature
+		isGemini3Model := isGemini3OrLater(info.UpstreamModelName)
+		
 		// isToolCall := false
 		if message.ToolCalls != nil {
 			// message.Role = "model"
 			// isToolCall = true
-			for _, call := range message.ParseToolCalls() {
+			for idx, call := range message.ParseToolCalls() {
 				args := map[string]interface{}{}
 				if call.Function.Arguments != "" {
 					if json.Unmarshal([]byte(call.Function.Arguments), &args) != nil {
@@ -406,10 +456,17 @@ func CovertOpenAI2Gemini(c *gin.Context, textRequest dto.GeneralOpenAIRequest, i
 						Arguments:    args,
 					},
 				}
-				if shouldAttachThoughtSignature && !signatureAttached && hasFunctionCallContent(toolCall.FunctionCall) && len(toolCall.ThoughtSignature) == 0 {
+				
+				// Gemini 3+ 模型：第一个 function_call 必须有 thought_signature
+				if isGemini3Model && idx == 0 && len(toolCall.ThoughtSignature) == 0 {
+					toolCall.ThoughtSignature = getDummyThoughtSignature()
+					signatureAttached = true
+				} else if shouldAttachThoughtSignature && !signatureAttached && hasFunctionCallContent(toolCall.FunctionCall) && len(toolCall.ThoughtSignature) == 0 {
+					// 旧的逻辑：使用 JSON 字符串形式的签名
 					toolCall.ThoughtSignature = json.RawMessage(strconv.Quote(thoughtSignatureBypassValue))
 					signatureAttached = true
 				}
+				
 				parts = append(parts, toolCall)
 				tool_call_ids[call.ID] = call.Function.Name
 			}
@@ -794,9 +851,13 @@ func getResponseToolCall(item *dto.GeminiPart) *dto.ToolCallResponse {
 	}
 
 	if err != nil {
+		if common.DebugEnabled {
+			common.SysError(fmt.Sprintf("Failed to marshal tool call arguments: %v", err))
+		}
 		return nil
 	}
-	return &dto.ToolCallResponse{
+	
+	toolCall := &dto.ToolCallResponse{
 		ID:   fmt.Sprintf("call_%s", common.GetUUID()),
 		Type: "function",
 		Function: dto.FunctionResponse{
@@ -804,6 +865,16 @@ func getResponseToolCall(item *dto.GeminiPart) *dto.ToolCallResponse {
 			Name:      item.FunctionCall.FunctionName,
 		},
 	}
+	
+	// 打印转换后的工具调用
+	if common.DebugEnabled {
+		common.SysLog(fmt.Sprintf("=== Converted Tool Call ==="))
+		common.SysLog(fmt.Sprintf("ID: %s", toolCall.ID))
+		common.SysLog(fmt.Sprintf("Name: %s", toolCall.Function.Name))
+		common.SysLog(fmt.Sprintf("Arguments: %s", toolCall.Function.Arguments))
+	}
+	
+	return toolCall
 }
 
 func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse) *dto.OpenAITextResponse {
@@ -885,6 +956,11 @@ func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse)
 func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*dto.ChatCompletionsStreamResponse, bool) {
 	choices := make([]dto.ChatCompletionsStreamResponseChoice, 0, len(geminiResponse.Candidates))
 	isStop := false
+	
+	if common.DebugEnabled && len(geminiResponse.Candidates) > 0 {
+		common.SysLog(fmt.Sprintf("=== streamResponseGeminiChat2OpenAI: %d candidates ===", len(geminiResponse.Candidates)))
+	}
+	
 	for _, candidate := range geminiResponse.Candidates {
 		if candidate.FinishReason != nil && *candidate.FinishReason == "STOP" {
 			isStop = true
@@ -897,7 +973,6 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 			},
 		}
 		var texts []string
-		isTools := false
 		isThought := false
 		if candidate.FinishReason != nil {
 			// p := GeminiConvertFinishReason(*candidate.FinishReason)
@@ -910,6 +985,11 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 				choice.FinishReason = &constant.FinishReasonContentFilter
 			}
 		}
+		
+		if common.DebugEnabled {
+			common.SysLog(fmt.Sprintf("Processing candidate %d with %d parts", candidate.Index, len(candidate.Content.Parts)))
+		}
+		
 		for _, part := range candidate.Content.Parts {
 			if part.InlineData != nil {
 				if strings.HasPrefix(part.InlineData.MimeType, "image") {
@@ -917,10 +997,17 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 					texts = append(texts, imgText)
 				}
 			} else if part.FunctionCall != nil {
-				isTools = true
+				if common.DebugEnabled {
+					common.SysLog(fmt.Sprintf("Found FunctionCall: %s", part.FunctionCall.FunctionName))
+					argsJSON, _ := json.Marshal(part.FunctionCall.Arguments)
+					common.SysLog(fmt.Sprintf("FunctionCall Args: %s", string(argsJSON)))
+				}
 				if call := getResponseToolCall(&part); call != nil {
 					call.SetIndex(len(choice.Delta.ToolCalls))
 					choice.Delta.ToolCalls = append(choice.Delta.ToolCalls, *call)
+					if common.DebugEnabled {
+						common.SysLog(fmt.Sprintf("Added to delta.ToolCalls[%d]: %s", len(choice.Delta.ToolCalls)-1, call.Function.Name))
+					}
 				}
 
 			} else if part.Thought {
@@ -943,9 +1030,12 @@ func streamResponseGeminiChat2OpenAI(geminiResponse *dto.GeminiChatResponse) (*d
 		} else {
 			choice.Delta.SetContentString(strings.Join(texts, "\n"))
 		}
-		if isTools {
-			choice.FinishReason = &constant.FinishReasonToolCalls
-		}
+		// 注意：不要在流式响应的中间 chunk 设置 finish_reason
+		// finish_reason 应该只在最后一个 chunk (isStop=true) 时设置
+		// 否则 LangChain 会把每个 chunk 的 finish_reason 拼接起来
+		// if isTools {
+		// 	choice.FinishReason = &constant.FinishReasonToolCalls
+		// }
 		choices = append(choices, choice)
 	}
 
@@ -983,10 +1073,80 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 		var geminiResponse dto.GeminiChatResponse
+		
+		// 1. 基础验证：检查数据长度
+		if len(data) == 0 {
+			if common.DebugEnabled {
+				logger.LogDebug(c, "skipping empty data chunk")
+			}
+			return true
+		}
+		
+		// 2. 验证 JSON 有效性
+		if !json.Valid([]byte(data)) {
+			logger.LogError(c, "invalid JSON in stream response, skipping chunk")
+			if common.DebugEnabled {
+				logger.LogError(c, "invalid JSON data: "+data)
+			}
+			// 跳过无效的 JSON，继续处理下一个
+			return true
+		}
+		
+		// 打印原始 JSON 数据用于调试
+		if common.DebugEnabled {
+			logger.LogDebug(c, "=== Gemini Stream Chunk (Raw JSON) ===")
+			logger.LogDebug(c, data)
+		}
+		
+		// 3. 解析 JSON
 		err := common.UnmarshalJsonStr(data, &geminiResponse)
 		if err != nil {
 			logger.LogError(c, "error unmarshalling stream response: "+err.Error())
-			return false
+			if common.DebugEnabled {
+				logger.LogError(c, "failed to parse JSON data: "+data)
+			}
+			// 继续处理，而不是中断整个流
+			return true
+		}
+		
+		// 4. 验证响应结构：检查是否有有效的 candidates
+		if len(geminiResponse.Candidates) == 0 {
+			if common.DebugEnabled {
+				logger.LogDebug(c, "skipping chunk with no candidates")
+			}
+			// 没有 candidates，可能是中间的元数据 chunk，跳过
+			return true
+		}
+		
+		// 5. 验证 candidates 内容：检查是否有有效的 parts
+		hasValidContent := false
+		for _, candidate := range geminiResponse.Candidates {
+			if len(candidate.Content.Parts) > 0 {
+				hasValidContent = true
+				break
+			}
+		}
+		
+		if !hasValidContent {
+			if common.DebugEnabled {
+				logger.LogDebug(c, "skipping chunk with no valid content parts")
+			}
+			// 没有有效内容，跳过
+			return true
+		}
+		
+		// 打印解析后的工具调用信息
+		if common.DebugEnabled && len(geminiResponse.Candidates) > 0 {
+			for idx, candidate := range geminiResponse.Candidates {
+				for partIdx, part := range candidate.Content.Parts {
+					if part.FunctionCall != nil {
+						logger.LogDebug(c, fmt.Sprintf("=== Function Call [Candidate %d, Part %d] ===", idx, partIdx))
+						logger.LogDebug(c, fmt.Sprintf("Function Name: %s", part.FunctionCall.FunctionName))
+						argsJSON, _ := json.MarshalIndent(part.FunctionCall.Arguments, "", "  ")
+						logger.LogDebug(c, fmt.Sprintf("Function Args: %s", string(argsJSON)))
+					}
+				}
+			}
 		}
 
 		// 统计图片数量
@@ -1046,6 +1206,15 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 	id := helper.GetResponseID(c)
 	createAt := common.GetTimestamp()
 	finishReason := constant.FinishReasonStop
+	
+	// 跟踪已发送的工具调用，用于实现增量传输
+	// key: function_name, value: {id, sentArgsLength}
+	sentToolCalls := make(map[string]struct {
+		id              string
+		index           int
+		sentArgsLength  int
+		fullArgs        string
+	})
 
 	usage, err := geminiStreamHandler(c, info, resp, func(data string, geminiResponse *dto.GeminiChatResponse) bool {
 		response, isStop := streamResponseGeminiChat2OpenAI(geminiResponse)
@@ -1054,35 +1223,82 @@ func GeminiChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *
 		response.Created = createAt
 		response.Model = info.UpstreamModelName
 
+		// 打印转换后的 response
+		if common.DebugEnabled && response.IsToolCall() {
+			logger.LogDebug(c, "=== After streamResponseGeminiChat2OpenAI ===")
+			for idx, tc := range response.Choices[0].Delta.ToolCalls {
+				logger.LogDebug(c, fmt.Sprintf("ToolCall[%d]: ID=%s, Name=%s, ArgsLen=%d", 
+					idx, tc.ID, tc.Function.Name, len(tc.Function.Arguments)))
+				logger.LogDebug(c, fmt.Sprintf("ToolCall[%d] Args: %s", idx, tc.Function.Arguments))
+			}
+		}
+
 		logger.LogDebug(c, fmt.Sprintf("info.SendResponseCount = %d", info.SendResponseCount))
+		
+		// 处理工具调用：确保使用固定的 ID 和 index
+		if response.IsToolCall() && len(response.Choices) > 0 {
+			if common.DebugEnabled {
+				logger.LogDebug(c, fmt.Sprintf("=== Processing Tool Calls (Total: %d) ===", len(response.Choices[0].Delta.ToolCalls)))
+			}
+			
+			for i := range response.Choices[0].Delta.ToolCalls {
+				toolCall := &response.Choices[0].Delta.ToolCalls[i]
+				funcName := toolCall.Function.Name
+				
+				if common.DebugEnabled {
+					logger.LogDebug(c, fmt.Sprintf("Tool: %s, Args: %s", funcName, toolCall.Function.Arguments))
+				}
+				
+				state, exists := sentToolCalls[funcName]
+				if exists {
+					// 已经见过这个工具，使用已有的 ID 和 index
+					toolCall.ID = state.id
+					toolCall.Index = &state.index
+					toolCall.Type = "function"
+					
+					if common.DebugEnabled {
+						logger.LogDebug(c, fmt.Sprintf("Reusing ID: %s, Index: %d", state.id, state.index))
+					}
+				} else {
+					// 第一次见到，记录 ID 和 index
+					toolIndex := len(sentToolCalls)
+					toolCall.Index = &toolIndex
+					if toolCall.ID == "" {
+						toolCall.ID = fmt.Sprintf("call_%s", common.GetUUID())
+					}
+					toolCall.Type = "function"
+					
+					sentToolCalls[funcName] = struct {
+						id             string
+						index          int
+						sentArgsLength int
+						fullArgs       string
+					}{
+						id:    toolCall.ID,
+						index: toolIndex,
+					}
+					
+					if common.DebugEnabled {
+						logger.LogDebug(c, fmt.Sprintf("New tool: %s, ID: %s, Index: %d", funcName, toolCall.ID, toolIndex))
+					}
+				}
+			}
+			
+			finishReason = constant.FinishReasonToolCalls
+		}
+		
+		// 清除 response 中的 finish_reason（避免在流式中间 chunk 发送）
+		// finish_reason 只应该在最后的 STOP chunk 中发送
+		if len(response.Choices) > 0 {
+			response.Choices[0].FinishReason = nil
+		}
+		
 		if info.SendResponseCount == 0 {
 			// send first response
 			emptyResponse := helper.GenerateStartEmptyResponse(id, createAt, info.UpstreamModelName, nil)
-			if response.IsToolCall() {
-				if len(emptyResponse.Choices) > 0 && len(response.Choices) > 0 {
-					toolCalls := response.Choices[0].Delta.ToolCalls
-					copiedToolCalls := make([]dto.ToolCallResponse, len(toolCalls))
-					for idx := range toolCalls {
-						copiedToolCalls[idx] = toolCalls[idx]
-						copiedToolCalls[idx].Function.Arguments = ""
-					}
-					emptyResponse.Choices[0].Delta.ToolCalls = copiedToolCalls
-				}
-				finishReason = constant.FinishReasonToolCalls
-				err := handleStream(c, info, emptyResponse)
-				if err != nil {
-					logger.LogError(c, err.Error())
-				}
-
-				response.ClearToolCalls()
-				if response.IsFinished() {
-					response.Choices[0].FinishReason = nil
-				}
-			} else {
-				err := handleStream(c, info, emptyResponse)
-				if err != nil {
-					logger.LogError(c, err.Error())
-				}
+			err := handleStream(c, info, emptyResponse)
+			if err != nil {
+				logger.LogError(c, err.Error())
 			}
 		}
 

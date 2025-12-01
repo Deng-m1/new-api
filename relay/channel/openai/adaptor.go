@@ -322,8 +322,12 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 
 		info.ReasoningEffort = request.ReasoningEffort
 
-		// o系列模型developer适配（o1-mini除外）
-		if !strings.HasPrefix(info.UpstreamModelName, "o1-mini") && !strings.HasPrefix(info.UpstreamModelName, "o1-preview") {
+		// o系列模型（o1-mini、o1-preview除外）和gpt-5系列模型使用developer角色
+		shouldUseDeveloperRole := strings.HasPrefix(info.UpstreamModelName, "gpt-5") ||
+			(strings.HasPrefix(info.UpstreamModelName, "o") &&
+				!strings.HasPrefix(info.UpstreamModelName, "o1-mini") &&
+				!strings.HasPrefix(info.UpstreamModelName, "o1-preview"))
+		if shouldUseDeveloperRole {
 			//修改第一个Message的内容，将system改为developer
 			if len(request.Messages) > 0 && request.Messages[0].Role == "system" {
 				request.Messages[0].Role = "developer"

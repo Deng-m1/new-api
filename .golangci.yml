@@ -1,0 +1,121 @@
+run:
+  # 超时时间
+  timeout: 5m
+  # 跳过的目录
+  skip-dirs:
+    - web
+    - logs
+    - data
+    - bin
+    - electron
+  # 跳过的文件
+  skip-files:
+    - ".*_test.go"
+
+# 输出配置
+output:
+  # 输出格式
+  formats:
+    - format: colored-line-number
+  # 打印检查的路径
+  print-issued-lines: true
+  # 打印检查的行数
+  print-linter-name: true
+
+# linter 配置
+linters:
+  # 启用默认的 linter
+  enable:
+    - errcheck      # 检查错误是否被处理
+    - gosimple      # 简化代码
+    - govet         # 检查常见错误
+    - ineffassign   # 检查无效赋值
+    - staticcheck   # 静态检查
+    - unused        # 检查未使用的代码
+    - gofmt         # 检查代码格式
+    - goimports     # 检查导入顺序
+    - misspell      # 检查拼写错误
+    - goconst       # 检查可以提取为常量的字符串
+    - gosec         # 安全检查
+    - typecheck     # 类型检查
+  
+  # 禁用 linters
+  disable:
+    - deadcode      # 已废弃
+    - varcheck      # 已废弃
+    - structcheck   # 已废弃
+    - golint        # 已废弃
+    - scopelint     # 已废弃
+    - interfacer    # 已废弃
+    - maligned      # 已废弃
+
+# linter 设置
+linters-settings:
+  # errcheck 配置
+  errcheck:
+    # 忽略特定函数的错误
+    ignore: fmt:.*,io/ioutil:^Read.*
+    # 检查类型断言
+    check-type-assertions: false
+    # 检查空白标识符
+    check-blank: false
+
+  # govet 配置
+  govet:
+    # 检查 shadow 变量
+    check-shadowing: false
+    # 启用所有检查器
+    enable-all: false
+    # 禁用特定检查器
+    disable:
+      - shadow
+
+  # gosec 配置
+  gosec:
+    # 要运行的检查 ID
+    includes: []
+    # 要排除的检查 ID
+    excludes:
+      - G401  # 使用弱加密算法
+      - G501  # 导入弱加密包
+      - G404  # 使用不安全的随机数生成器
+
+  # gofmt 配置
+  gofmt:
+    # 简化代码
+    simplify: true
+
+  # misspell 配置
+  misspell:
+    # 语言
+    locale: US
+
+  # goconst 配置
+  goconst:
+    # 最小字符串长度
+    min-len: 3
+    # 最小出现次数
+    min-occurrences: 3
+
+# issues 配置
+issues:
+  # 排除特定的问题
+  exclude-rules:
+    # 排除测试文件中的某些检查
+    - path: _test\.go
+      linters:
+        - gosec
+        - goconst
+    # 排除主程序入口的某些检查
+    - path: main\.go
+      linters:
+        - goconst
+  
+  # 最多显示的 issues 数量，0 表示不限制
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  
+  # 显示被排除的 issues
+  exclude-use-default: false
+
+

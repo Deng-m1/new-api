@@ -223,12 +223,14 @@ func (r *GeneralOpenAIRequest) ToMap() map[string]any {
 }
 
 func (r *GeneralOpenAIRequest) GetSystemRoleName() string {
+	// gpt-5系列和o系列模型（o1-mini、o1-preview除外）使用developer角色
+	if strings.HasPrefix(r.Model, "gpt-5") {
+		return "developer"
+	}
 	if strings.HasPrefix(r.Model, "o") {
 		if !strings.HasPrefix(r.Model, "o1-mini") && !strings.HasPrefix(r.Model, "o1-preview") {
 			return "developer"
 		}
-	} else if strings.HasPrefix(r.Model, "gpt-5") {
-		return "developer"
 	}
 	return "system"
 }

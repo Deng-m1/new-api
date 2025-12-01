@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -79,6 +80,24 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
+		
+		// 在 PassThrough 模式下，也需要应用模型映射
+		if info.IsModelMapped {
+			var bodyMap map[string]interface{}
+			if err := json.Unmarshal(body, &bodyMap); err == nil {
+				// 替换请求体中的模型名
+				if _, exists := bodyMap["model"]; exists {
+					bodyMap["model"] = info.UpstreamModelName
+					modifiedBody, err := json.Marshal(bodyMap)
+					if err == nil {
+						body = modifiedBody
+						common.SysLog(fmt.Sprintf("[PassThrough] Applied model mapping in body: %s -> %s", 
+							info.OriginModelName, info.UpstreamModelName))
+					}
+				}
+			}
+		}
+		
 		if common.DebugEnabled {
 			println("requestBody: ", string(body))
 		}
@@ -134,6 +153,15 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		jsonData, err := common.Marshal(convertedRequest)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeJsonMarshalFailed, types.ErrOptionWithSkipRetry())
+		}
+		
+		// 调试：显示最终请求体中的模型名
+		var debugReq map[string]interface{}
+		if err := json.Unmarshal(jsonData, &debugReq); err == nil {
+			if model, ok := debugReq["model"]; ok {
+				common.SysLog(fmt.Sprintf("[Request] Final request body model: %v (OriginModel=%s, UpstreamModel=%s)", 
+					model, info.OriginModelName, info.UpstreamModelName))
+			}
 		}
 
 		// remove disabled fields for OpenAI API

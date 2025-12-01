@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,6 +52,22 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
+		
+		// 在 PassThrough 模式下，也需要应用模型映射
+		if info.IsModelMapped {
+			var bodyMap map[string]interface{}
+			if err := json.Unmarshal(body, &bodyMap); err == nil {
+				if _, exists := bodyMap["model"]; exists {
+					bodyMap["model"] = info.UpstreamModelName
+					if modifiedBody, err := json.Marshal(bodyMap); err == nil {
+						body = modifiedBody
+						common.SysLog(fmt.Sprintf("[PassThrough] Applied model mapping in image: %s -> %s", 
+							info.OriginModelName, info.UpstreamModelName))
+					}
+				}
+			}
+		}
+		
 		requestBody = bytes.NewBuffer(body)
 	} else {
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)

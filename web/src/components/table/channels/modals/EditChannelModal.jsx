@@ -1024,8 +1024,8 @@ const EditChannelModal = (props) => {
 
     if (localInputs.type === 41) {
       const keyType = localInputs.vertex_key_type || 'json';
-      if (keyType === 'api_key') {
-        // 直接作为普通字符串密钥处理
+      if (keyType === 'api_key' || keyType === 'api_key_with_project') {
+        // API Key 模式和 API Key (with Project) 模式：直接作为普通字符串密钥处理
         if (!isEdit && (!localInputs.key || localInputs.key.trim() === '')) {
           showInfo(t('请输入密钥！'));
           return;
@@ -1192,6 +1192,14 @@ const EditChannelModal = (props) => {
       settings.aws_key_type = localInputs.aws_key_type || 'ak_sk';
     }
 
+    // type === 41 (Vertex AI): 保存 vertex_key_type 和 vertex_project_id 到 settings
+    if (localInputs.type === 41) {
+      settings.vertex_key_type = localInputs.vertex_key_type || 'json';
+      if (localInputs.vertex_project_id) {
+        settings.vertex_project_id = localInputs.vertex_project_id;
+      }
+    }
+
     // type === 1 (OpenAI) 或 type === 14 (Claude): 设置字段透传控制（显式保存布尔值）
     if (localInputs.type === 1 || localInputs.type === 14) {
       settings.allow_service_tier = localInputs.allow_service_tier === true;
@@ -1213,8 +1221,9 @@ const EditChannelModal = (props) => {
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.is_enterprise_account;
-    // 顶层的 vertex_key_type 不应发送给后端
+    // 顶层的 vertex_key_type 不应发送给后端（已保存到 settings）
     delete localInputs.vertex_key_type;
+    delete localInputs.vertex_project_id;
     // 顶层的 aws_key_type 不应发送给后端
     delete localInputs.aws_key_type;
     // 清理字段透传控制的临时字段
@@ -1346,10 +1355,15 @@ const EditChannelModal = (props) => {
     }
   };
 
+  // Vertex AI 的 API Key 和 API Key (with Project) 模式不支持批量创建
+  const isVertexApiKeyMode = inputs.type === 41 && (inputs.vertex_key_type === 'api_key' || inputs.vertex_key_type === 'api_key_with_project');
   const batchAllowed = !isEdit || isMultiKeyChannel;
+  const batchCheckboxAllowed = batchAllowed && !isVertexApiKeyMode;
+  // 对于 Vertex API Key 模式，允许多密钥但不允许批量创建多个渠道
+  const showMultiKeyOptions = batch || isVertexApiKeyMode;
   const batchExtra = batchAllowed ? (
     <Space>
-      {!isEdit && (
+      {!isEdit && batchCheckboxAllowed && (
         <Checkbox
           disabled={isEdit}
           checked={batch}
@@ -1404,7 +1418,7 @@ const EditChannelModal = (props) => {
           {t('批量创建')}
         </Checkbox>
       )}
-      {batch && (
+      {showMultiKeyOptions && (
         <>
           <Checkbox
             disabled={isEdit}
@@ -1692,6 +1706,7 @@ const EditChannelModal = (props) => {
 
                     {inputs.type === 41 && (
                       <Form.Select
+                        key={`vertex_key_type_${inputs.vertex_key_type || 'json'}`}
                         field='vertex_key_type'
                         label={t('密钥格式')}
                         placeholder={t('请选择密钥格式')}
@@ -1703,14 +1718,16 @@ const EditChannelModal = (props) => {
                         style={{ width: '100%' }}
                         value={inputs.vertex_key_type || 'json'}
                         onChange={(value) => {
-                          // 更新设置中的 vertex_key_type
+                          // 先更新设置中的 vertex_key_type，确保状态立即生效
                           handleChannelOtherSettingsChange(
                             'vertex_key_type',
                             value,
                           );
-                          // 切换为 api_key 或 api_key_with_project 时，关闭批量与手动/文件切换，并清理已选文件
+                          
+                          // 切换为 api_key 或 api_key_with_project 时，关闭批量创建但保留聚合模式
                           if (value === 'api_key' || value === 'api_key_with_project') {
                             setBatch(false);
+                            // 保留 multiToSingle 状态，允许用户使用聚合模式（轮询/随机）
                             setUseManualInput(false);
                             setVertexKeys([]);
                             setVertexFileList([]);
@@ -1743,7 +1760,7 @@ const EditChannelModal = (props) => {
                         extraText={t('格式如：my-project-123456')}
                       />
                     )}
-                    {batch ? (
+                    {batch && !isVertexApiKeyMode ? (
                       inputs.type === 41 &&
                       (inputs.vertex_key_type || 'json') === 'json' ? (
                         <Form.Upload
@@ -1970,6 +1987,54 @@ const EditChannelModal = (props) => {
                               />
                             )}
                           </>
+                        ) : isVertexApiKeyMode ? (
+                          <Form.TextArea
+                            field='key'
+                            label={
+                              isEdit
+                                ? t('密钥（编辑模式下，保存的密钥不会显示）')
+                                : t('密钥')
+                            }
+                            placeholder={t('请输入 API Key，多个密钥请一行一个')}
+                            rules={
+                              isEdit
+                                ? []
+                                : [{ required: true, message: t('请输入密钥') }]
+                            }
+                            autosize
+                            autoComplete='new-password'
+                            onChange={(value) =>
+                              handleInputChange('key', value)
+                            }
+                            extraText={
+                              <div className='flex items-center gap-2 flex-wrap'>
+                                <Text type='tertiary' size='small'>
+                                  {t('支持输入多个 API Key，一行一个')}
+                                </Text>
+                                {isEdit &&
+                                  isMultiKeyChannel &&
+                                  keyMode === 'append' && (
+                                    <Text type='warning' size='small'>
+                                      {t(
+                                        '追加模式：新密钥将添加到现有密钥列表的末尾',
+                                      )}
+                                    </Text>
+                                  )}
+                                {isEdit && (
+                                  <Button
+                                    size='small'
+                                    type='primary'
+                                    theme='outline'
+                                    onClick={handleShow2FAModal}
+                                  >
+                                    {t('查看密钥')}
+                                  </Button>
+                                )}
+                                {batchExtra}
+                              </div>
+                            }
+                            showClear
+                          />
                         ) : (
                           <Form.Input
                             field='key'
@@ -2045,7 +2110,7 @@ const EditChannelModal = (props) => {
                         }
                       />
                     )}
-                    {batch && multiToSingle && (
+                    {showMultiKeyOptions && multiToSingle && (
                       <>
                         <Form.Select
                           field='multi_key_mode'

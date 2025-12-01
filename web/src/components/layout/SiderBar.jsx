@@ -33,6 +33,7 @@ import { Nav, Divider, Button } from '@douyinfe/semi-ui';
 const routerMap = {
   home: '/',
   channel: '/console/channel',
+  channelStats: '/console/channel-stats',
   token: '/console/token',
   redemption: '/console/redemption',
   topup: '/console/topup',
@@ -78,6 +79,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
             : 'tableHiddle',
       },
       {
+        text: t('渠道统计'),
+        itemKey: 'channelStats',
+        to: '/console/channel-stats',
+      },
+      {
         text: t('令牌管理'),
         itemKey: 'token',
         to: '/token',
@@ -107,6 +113,10 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
     // 根据配置过滤项目
     const filteredItems = items.filter((item) => {
+      // channelStats 始终可见，不受配置限制
+      if (item.itemKey === 'channelStats') {
+        return true;
+      }
       const configVisible = isModuleVisible('console', item.itemKey);
       return configVisible;
     });

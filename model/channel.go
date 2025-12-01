@@ -220,12 +220,18 @@ func (channel *Channel) getModelsWithMappingTargets(models []string) []string {
 		err := json.Unmarshal([]byte(*channel.ModelMapping), &modelMapping)
 		if err == nil {
 			// 将所有重定向的目标模型也添加到集合中
-			for _, targetModel := range modelMapping {
+			for sourceModel, targetModel := range modelMapping {
 				targetModel = strings.TrimSpace(targetModel)
 				if targetModel != "" {
 					modelSet[targetModel] = struct{}{}
+					if common.DebugEnabled {
+						common.SysLog(fmt.Sprintf("[ModelMapping] Channel #%d: %s -> %s (added both to abilities)", 
+							channel.Id, sourceModel, targetModel))
+					}
 				}
 			}
+		} else {
+			common.SysLog(fmt.Sprintf("[ModelMapping] Channel #%d: Failed to parse model_mapping: %v", channel.Id, err))
 		}
 	}
 	
@@ -233,6 +239,11 @@ func (channel *Channel) getModelsWithMappingTargets(models []string) []string {
 	result := make([]string, 0, len(modelSet))
 	for model := range modelSet {
 		result = append(result, model)
+	}
+	
+	if common.DebugEnabled && len(result) > len(models) {
+		common.SysLog(fmt.Sprintf("[ModelMapping] Channel #%d: Expanded models from %v to %v", 
+			channel.Id, models, result))
 	}
 	
 	return result

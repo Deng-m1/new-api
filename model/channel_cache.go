@@ -24,7 +24,8 @@ func InitChannelCache() {
 	}
 	newChannelId2channel := make(map[int]*Channel)
 	var channels []*Channel
-	DB.Find(&channels)
+	// 明确选择所有字段，确保 model_mapping 等字段被正确加载
+	DB.Select("*").Find(&channels)
 	for _, channel := range channels {
 		newChannelId2channel[channel.Id] = channel
 	}
@@ -44,8 +45,27 @@ func InitChannelCache() {
 		}
 		groups := strings.Split(channel.Group, ",")
 		for _, group := range groups {
-			models := strings.Split(channel.Models, ",")
+			// 使用 getModelsWithMappingTargets 来包含重定向目标模型
+			baseModels := strings.Split(channel.Models, ",")
+			models := channel.getModelsWithMappingTargets(baseModels)
+			
+			// 强制日志：显示扩展后的模型列表
+			if len(models) != len(baseModels) {
+				common.SysLog(fmt.Sprintf("[Cache] Channel #%d: models expanded from %d to %d: %v -> %v, ModelMapping=%v",
+					channel.Id, len(baseModels), len(models), baseModels, models, 
+					func() string {
+						if channel.ModelMapping == nil {
+							return "nil"
+						}
+						return *channel.ModelMapping
+					}()))
+			}
+			
 			for _, model := range models {
+				model = strings.TrimSpace(model)
+				if model == "" {
+					continue
+				}
 				if _, ok := newGroup2model2channels[group][model]; !ok {
 					newGroup2model2channels[group][model] = make([]int, 0)
 				}
@@ -65,8 +85,8 @@ func InitChannelCache() {
 	}
 
 	channelSyncLock.Lock()
-	group2model2channels = newGroup2model2channels
-	//channelsIDM = newChannelId2channel
+	
+	// 先处理多密钥轮询索引，使用旧的 channelsIDM
 	for i, channel := range newChannelId2channel {
 		if channel.ChannelInfo.IsMultiKey {
 			channel.Keys = channel.GetKeys()
@@ -80,7 +100,11 @@ func InitChannelCache() {
 			}
 		}
 	}
+	
+	// 原子性地同时更新两个 map，确保一致性
 	channelsIDM = newChannelId2channel
+	group2model2channels = newGroup2model2channels
+	
 	channelSyncLock.Unlock()
 	common.SysLog("channels synced from database")
 }
@@ -105,21 +129,54 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	// First, try to find channels with the exact model name.
 	channels := group2model2channels[group][model]
 
+	// 调试日志：显示查询参数和结果
+	common.SysLog(fmt.Sprintf("[Query] GetRandomSatisfiedChannel: group=%s, model=%s, found=%d channels", group, model, len(channels)))
+	
 	// If no channels found, try to find channels with the normalized model name.
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = group2model2channels[group][normalizedModel]
+		if normalizedModel != model {
+			channels = group2model2channels[group][normalizedModel]
+			common.SysLog(fmt.Sprintf("[Query] Normalized model: %s -> %s, found=%d channels", model, normalizedModel, len(channels)))
+		}
 	}
 
 	if len(channels) == 0 {
+		// 调试：显示缓存中有哪些 group 和 model
+		common.SysLog(fmt.Sprintf("[Query] Cache miss! Available groups: %v", func() []string {
+			groups := make([]string, 0, len(group2model2channels))
+			for g := range group2model2channels {
+				groups = append(groups, g)
+			}
+			return groups
+		}()))
+		if models, ok := group2model2channels[group]; ok {
+			common.SysLog(fmt.Sprintf("[Query] Available models in group '%s': %v", group, func() []string {
+				modelList := make([]string, 0, len(models))
+				for m := range models {
+					modelList = append(modelList, m)
+				}
+				return modelList
+			}()))
+		}
 		return nil, nil
 	}
 
 	if len(channels) == 1 {
-		if channel, ok := channelsIDM[channels[0]]; ok {
+		channelId := channels[0]
+		if channel, ok := channelsIDM[channelId]; ok {
+			common.SysLog(fmt.Sprintf("[Query] Found single channel: #%d, name=%s", channelId, channel.Name))
 			return channel, nil
 		}
-		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
+		common.SysLog(fmt.Sprintf("[Query] ERROR: Channel #%d found in cache but not in channelsIDM! channelsIDM keys: %v", 
+			channelId, func() []int {
+				keys := make([]int, 0, len(channelsIDM))
+				for k := range channelsIDM {
+					keys = append(keys, k)
+				}
+				return keys
+			}()))
+		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 	}
 
 	uniquePriorities := make(map[int]bool)
@@ -127,6 +184,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		if channel, ok := channelsIDM[channelId]; ok {
 			uniquePriorities[int(channel.GetPriority())] = true
 		} else {
+			common.SysLog(fmt.Sprintf("[Query] ERROR: Channel #%d not found in channelsIDM", channelId))
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
 	}
@@ -136,10 +194,14 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
+	common.SysLog(fmt.Sprintf("[Query] Found %d unique priorities: %v, retry=%d", len(uniquePriorities), sortedUniquePriorities, retry))
+	
 	if retry >= len(uniquePriorities) {
+		common.SysLog(fmt.Sprintf("[Query] Retry %d >= %d priorities, adjusting to %d", retry, len(uniquePriorities), len(uniquePriorities)-1))
 		retry = len(uniquePriorities) - 1
 	}
 	targetPriority := int64(sortedUniquePriorities[retry])
+	common.SysLog(fmt.Sprintf("[Query] Target priority: %d", targetPriority))
 
 	// get the priority for the given retry number
 	var sumWeight = 0

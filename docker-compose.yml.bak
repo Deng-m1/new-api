@@ -1,0 +1,42 @@
+# New-API Docker Compose Configuration
+# 
+# Modified to use existing Redis and PostgreSQL services on the host
+#
+# ⚠️  IMPORTANT: This configuration connects to external services running on the host
+
+version: '3.4'
+
+services:
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: new-api
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3001:3000"  # Changed from 3000 to 3001 to avoid port conflict with langfuse
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    environment:
+      # Connect to existing PostgreSQL on host (port 5433 mapped to container's 5432)
+      # Added sslmode=disable to avoid TLS connection issues
+      - SQL_DSN=postgresql://ainoval:fu3WjsFNqecpdnzi7TxMSGDCX2PyZJ0H@host.docker.internal:5433/new-api?sslmode=disable
+      # Connect to existing Redis on host (port 6379)
+      - REDIS_CONN_STRING=redis://host.docker.internal:6379
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+      - BATCH_UPDATE_ENABLED=true
+#      - STREAMING_TIMEOUT=300
+#      - SESSION_SECRET=random_string
+#      - SYNC_FREQUENCY=60
+#      - GOOGLE_ANALYTICS_ID=G-XXXXXXXXXX
+#      - UMAMI_WEBSITE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+#      - UMAMI_SCRIPT_URL=https://analytics.umami.is/script.js
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Enable access to host services
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\\\"success\\\":\\\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

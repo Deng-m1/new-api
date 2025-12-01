@@ -4,12 +4,21 @@
 
 之前的 new-api 实现中，模型重定向无法正常工作，因为：
 1. 渠道选择在模型重定向之前执行
-2. 渠道选择基于 `abilities` 表查询
+2. 渠道选择基于 `abilities` 表查询（无缓存）或内存缓存
 3. `abilities` 表中只包含渠道模型列表中的模型，不包含重定向目标模型
+4. ⚠️ **内存缓存也只基于 `channel.Models` 字段构建，不包含重定向目标模型**
 
 ## 解决方案
 
-修改了 `model/ability.go` 和 `model/channel.go`，在生成 abilities 表记录时，**自动将模型重定向配置中的目标模型也添加到 abilities 表中**。
+修改了 `model/ability.go`、`model/channel.go` 和 `model/channel_cache.go`，在生成 abilities 表记录和内存缓存时，**自动将模型重定向配置中的目标模型也包含进去**。
+
+### 关键点
+
+⚠️ **必须同时修复两个地方**：
+1. **Abilities 表生成**：确保数据库中有重定向目标模型的记录（无缓存模式需要）
+2. **内存缓存构建**：确保缓存中也包含重定向目标模型（有缓存模式需要）
+
+只修复其中一个会导致在不同配置下仍然失败！
 
 ## 修改的文件
 
@@ -27,6 +36,13 @@
 - `UpdateAbilities()` - 更新渠道时重新生成 abilities
 
 这两个方法现在都会调用 `getModelsWithMappingTargets()` 来获取完整的模型列表。
+
+### 3. `model/channel_cache.go` ⭐ **关键修复**
+
+修改了 `InitChannelCache()` 方法：
+- 在构建内存缓存时，也调用 `getModelsWithMappingTargets()`
+- 确保缓存中包含重定向目标模型
+- **这是最关键的修复**：之前 abilities 表虽然有记录，但缓存中没有，导致查询失败
 
 ## 使用示例
 

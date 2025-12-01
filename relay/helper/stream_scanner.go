@@ -181,34 +181,34 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 		}()
 
-		for scanner.Scan() {
-			// 检查是否需要停止
-			select {
-			case <-stopChan:
-				return
-			case <-ctx.Done():
-				return
-			case <-c.Request.Context().Done():
-				return
-			default:
-			}
+		// 判断是否需要使用 JSON 流式扫描器（只对 Gemini 和 Vertex 使用）
+		// 其他渠道（OpenAI、Claude 等）每行都是完整的 JSON，不需要特殊处理
+		useJSONScanner := info.ChannelType == constant.ChannelTypeGemini ||
+			info.ChannelType == constant.ChannelTypeVertexAi
 
-			ticker.Reset(streamingTimeout)
-			data := scanner.Text()
-			if common.DebugEnabled {
-				println(data)
-			}
+		if useJSONScanner {
+			// Gemini 和 Vertex 可能会将 JSON 分割成多行，使用 JSON 流式扫描器
+			jsonScanner := NewJSONStreamScanner(scanner)
 
-			if len(data) < 6 {
-				continue
-			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
-				continue
-			}
-			data = data[5:]
-			data = strings.TrimLeft(data, " ")
-			data = strings.TrimSuffix(data, "\r")
-			if !strings.HasPrefix(data, "[DONE]") {
+			for jsonScanner.Scan() {
+				// 检查是否需要停止
+				select {
+				case <-stopChan:
+					return
+				case <-ctx.Done():
+					return
+				case <-c.Request.Context().Done():
+					return
+				default:
+				}
+
+				ticker.Reset(streamingTimeout)
+				data := jsonScanner.Text()
+				if common.DebugEnabled {
+					println("Complete JSON received (Gemini/Vertex), length:", len(data))
+				}
+
+				// JSON 扫描器已经处理了格式验证，直接使用数据
 				info.SetFirstResponseTime()
 
 				// 使用超时机制防止写操作阻塞
@@ -232,18 +232,79 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				case <-stopChan:
 					return
 				}
-			} else {
-				// done, 处理完成标志，直接退出停止读取剩余数据防止出错
-				if common.DebugEnabled {
-					println("received [DONE], stopping scanner")
-				}
-				return
 			}
-		}
 
-		if err := scanner.Err(); err != nil {
-			if err != io.EOF {
-				logger.LogError(c, "scanner error: "+err.Error())
+			if err := jsonScanner.Err(); err != nil {
+				if err != io.EOF {
+					logger.LogError(c, "json scanner error: "+err.Error())
+				}
+			}
+		} else {
+			// 其他渠道：使用原始的按行扫描逻辑（保持与 git 原始代码一致）
+			for scanner.Scan() {
+				// 检查是否需要停止
+				select {
+				case <-stopChan:
+					return
+				case <-ctx.Done():
+					return
+				case <-c.Request.Context().Done():
+					return
+				default:
+				}
+
+				ticker.Reset(streamingTimeout)
+				data := scanner.Text()
+				if common.DebugEnabled {
+					println(data)
+				}
+
+				if len(data) < 6 {
+					continue
+				}
+				if data[:5] != "data:" && data[:6] != "[DONE]" {
+					continue
+				}
+				data = data[5:]
+				data = strings.TrimLeft(data, " ")
+				data = strings.TrimSuffix(data, "\r")
+				if !strings.HasPrefix(data, "[DONE]") {
+					info.SetFirstResponseTime()
+
+					// 使用超时机制防止写操作阻塞
+					done := make(chan bool, 1)
+					go func() {
+						writeMutex.Lock()
+						defer writeMutex.Unlock()
+						done <- dataHandler(data)
+					}()
+
+					select {
+					case success := <-done:
+						if !success {
+							return
+						}
+					case <-time.After(10 * time.Second):
+						logger.LogError(c, "data handler timeout")
+						return
+					case <-ctx.Done():
+						return
+					case <-stopChan:
+						return
+					}
+				} else {
+					// done, 处理完成标志，直接退出停止读取剩余数据防止出错
+					if common.DebugEnabled {
+						println("received [DONE], stopping scanner")
+					}
+					return
+				}
+			}
+
+			if err := scanner.Err(); err != nil {
+				if err != io.EOF {
+					logger.LogError(c, "scanner error: "+err.Error())
+				}
 			}
 		}
 	})
