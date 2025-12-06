@@ -133,3 +133,5 @@ const ComparisonTable = ({ performanceData, t }) => {
 export default ComparisonTable;
 
 
+
+

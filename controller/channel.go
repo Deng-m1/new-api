@@ -890,18 +890,18 @@ func UpdateChannel(c *gin.Context) {
 					existingKeys = strings.Split(strings.Trim(originChannel.Key, "\n"), "\n")
 				}
 
-			// 处理 Vertex AI 的特殊情况
-			if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType == dto.VertexKeyTypeJSON {
-				// 尝试解析新密钥为JSON数组
-				if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
-					array, err := getVertexArrayKeys(channel.Key)
-					if err != nil {
-						c.JSON(http.StatusOK, gin.H{
-							"success": false,
-							"message": "追加密钥解析失败: " + err.Error(),
-						})
-						return
-					}
+				// 处理 Vertex AI 的特殊情况
+				if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType == dto.VertexKeyTypeJSON {
+					// 尝试解析新密钥为JSON数组
+					if strings.HasPrefix(strings.TrimSpace(channel.Key), "[") {
+						array, err := getVertexArrayKeys(channel.Key)
+						if err != nil {
+							c.JSON(http.StatusOK, gin.H{
+								"success": false,
+								"message": "追加密钥解析失败: " + err.Error(),
+							})
+							return
+						}
 						newKeys = array
 					} else {
 						// 单个JSON密钥

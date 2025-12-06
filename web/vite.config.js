@@ -84,18 +84,19 @@ export default defineConfig({
     },
   },
   server: {
+    port: 5174,
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:13001',
         changeOrigin: true,
       },
       '/mj': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:13001',
         changeOrigin: true,
       },
       '/pg': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:13001',
         changeOrigin: true,
       },
     },

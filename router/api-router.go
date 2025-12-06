@@ -165,6 +165,17 @@ func SetApiRouter(router *gin.Engine) {
 		channelRoute.GET("/stats/realtime", controller.GetChannelRealtimeMetrics)
 		channelRoute.GET("/stats/errors", controller.GetChannelErrorAnalysis)
 		channelRoute.GET("/stats/export", controller.ExportChannelReport)
+		// Channel model statistics routes
+		channelRoute.GET("/stats/model-detail", controller.GetChannelModelStats)
+		channelRoute.GET("/stats/model-summary", controller.GetChannelModelSummary)
+		channelRoute.GET("/stats/models", controller.GetAvailableModels)
+		channelRoute.GET("/stats/model-export", controller.ExportChannelModelStats)
+		channelRoute.GET("/stats/model-percentiles", controller.GetChannelModelPercentiles)
+		channelRoute.GET("/stats/model-trend", controller.GetChannelModelTrend)
+		// Token range statistics routes
+		channelRoute.GET("/stats/token-range", controller.GetTokenRangeStats)
+		channelRoute.GET("/stats/token-range-detail", controller.GetTokenRangeDetailStats)
+		channelRoute.GET("/stats/token-range-comparison", controller.GetTokenRangeComparison)
 	}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

@@ -21,8 +21,20 @@ func getTimeFormatSQL(granularity string) string {
 		default:
 			return "TO_CHAR(TO_TIMESTAMP(logs.created_at), 'YYYY-MM-DD')"
 		}
+	} else if common.UsingSQLite {
+		// SQLite 语法 - 使用 strftime
+		switch granularity {
+		case "hour":
+			return "strftime('%Y-%m-%d %H:00:00', logs.created_at, 'unixepoch')"
+		case "day":
+			return "strftime('%Y-%m-%d', logs.created_at, 'unixepoch')"
+		case "week":
+			return "strftime('%Y-%W', logs.created_at, 'unixepoch')"
+		default:
+			return "strftime('%Y-%m-%d', logs.created_at, 'unixepoch')"
+		}
 	} else {
-		// MySQL/SQLite 语法
+		// MySQL 语法
 		switch granularity {
 		case "hour":
 			return "FROM_UNIXTIME(logs.created_at, '%Y-%m-%d %H:00:00')"

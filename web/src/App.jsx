@@ -54,6 +54,7 @@ const About = lazy(() => import('./pages/About'));
 const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const ChannelStats = lazy(() => import('./pages/ChannelStats'));
+const ChannelModelStats = lazy(() => import('./pages/ChannelModelStats'));
 
 function App() {
   const location = useLocation();
@@ -123,6 +124,16 @@ function App() {
             <PrivateRoute>
               <Suspense fallback={<Loading></Loading>} key={location.pathname}>
                 <ChannelStats />
+              </Suspense>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path='/console/channel-model-stats'
+          element={
+            <PrivateRoute>
+              <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+                <ChannelModelStats />
               </Suspense>
             </PrivateRoute>
           }

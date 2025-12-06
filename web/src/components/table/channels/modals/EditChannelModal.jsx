@@ -1239,6 +1239,9 @@ const EditChannelModal = (props) => {
     let mode = 'single';
     if (batch) {
       mode = multiToSingle ? 'multi_to_single' : 'batch';
+    } else if (multiToSingle) {
+      // 对于非批量模式（如 Vertex API Key 模式），如果勾选了聚合模式，也应该使用 multi_to_single
+      mode = 'multi_to_single';
     }
 
     if (isEdit) {

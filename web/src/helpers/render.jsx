@@ -64,6 +64,7 @@ import {
   MessageSquare,
   Key,
   BarChart3,
+  LineChart,
   Image as ImageIcon,
   CheckSquare,
   CreditCard,
@@ -109,6 +110,8 @@ export function getLucideIcon(key, selected = false) {
       return <Layers {...commonProps} color={iconColor} />;
     case 'channelStats':
       return <BarChart3 {...commonProps} color={iconColor} />;
+    case 'channelModelStats':
+      return <LineChart {...commonProps} color={iconColor} />;
     case 'redemption':
       return <Gift {...commonProps} color={iconColor} />;
     case 'user':

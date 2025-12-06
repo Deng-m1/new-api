@@ -34,6 +34,7 @@ const routerMap = {
   home: '/',
   channel: '/console/channel',
   channelStats: '/console/channel-stats',
+  channelModelStats: '/console/channel-model-stats',
   token: '/console/token',
   redemption: '/console/redemption',
   topup: '/console/topup',
@@ -84,6 +85,11 @@ const SiderBar = ({ onNavigate = () => {} }) => {
         to: '/console/channel-stats',
       },
       {
+        text: t('模型统计'),
+        itemKey: 'channelModelStats',
+        to: '/console/channel-model-stats',
+      },
+      {
         text: t('令牌管理'),
         itemKey: 'token',
         to: '/token',
@@ -113,8 +119,8 @@ const SiderBar = ({ onNavigate = () => {} }) => {
 
     // 根据配置过滤项目
     const filteredItems = items.filter((item) => {
-      // channelStats 始终可见，不受配置限制
-      if (item.itemKey === 'channelStats') {
+      // channelStats 和 channelModelStats 始终可见，不受配置限制
+      if (item.itemKey === 'channelStats' || item.itemKey === 'channelModelStats') {
         return true;
       }
       const configVisible = isModuleVisible('console', item.itemKey);
